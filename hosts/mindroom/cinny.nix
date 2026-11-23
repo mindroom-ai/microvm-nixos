@@ -15,8 +15,4 @@ in
     };
   };
 
-  # Rebuild and restart the web UI when the pin moves (the build service
-  # skips work when the checked-out revision matches its marker).
-  systemd.services.mindroom-cinny-build.restartTriggers = [ constants.cinnyRev ];
-  systemd.services.mindroom-cinny.restartTriggers = [ constants.cinnyRev ];
 }

@@ -3,8 +3,8 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    ragenix = {
-      url = "github:yaxitech/ragenix";
+    agenix = {
+      url = "github:ryantm/agenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     microvm = {
@@ -17,7 +17,7 @@
     {
       self,
       nixpkgs,
-      ragenix,
+      agenix,
       microvm,
       ...
     }:
@@ -29,7 +29,7 @@
       nixosConfigurations.mindroom = lib.nixosSystem {
         inherit system;
         modules = [
-          ragenix.nixosModules.default
+          agenix.nixosModules.default
           microvm.nixosModules.microvm
           ./hosts/mindroom/default.nix
           ./modules/microvm-guest.nix
@@ -46,7 +46,6 @@
           default = runner;
           mindroom-microvm = runner;
           # The pinned ragenix CLI from nixpkgs, used by scripts/bootstrap-secrets.sh.
-          # (Upstream ragenix's flake pins an older rust-overlay that breaks on current nixpkgs.)
           inherit (pkgs) ragenix;
         };
 

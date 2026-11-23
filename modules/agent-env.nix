@@ -15,8 +15,6 @@ let
   };
 in
 {
-  age.identityPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
-
   # Only reference secrets that an enabled runtime actually consumes, so a
   # deployment never fails on a secret it does not need.
   age.secrets = lib.mkMerge [

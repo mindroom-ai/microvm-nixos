@@ -22,8 +22,9 @@ in
     # 8 GiB covers the first-boot MindRoom Chat Vite build (NODE_OPTIONS 4 GiB)
     # alongside uv installs, Tuwunel, and the tmpfs root.
     mem = 8192;
-    # Fixed UUID so /etc/machine-id (32-hex) is stable and persistent journals
-    # under /var/log/journal survive reboots; regenerate per deployment (e.g. `systemd-id128 --uuid new`).
+    # Fixed UUID so /etc/machine-id is stable and persistent journals survive
+    # reboots. If you run more than one microVM from this repo, give each VM
+    # its own UUID (`systemd-id128 --uuid new`).
     machineId = "b8689be6-ba91-9b35-6625-0f34607521a2";
     socket = "control.sock";
 
@@ -125,7 +126,7 @@ in
     ${pkgs.util-linux}/bin/mountpoint -q /nix/var/nix || ${pkgs.util-linux}/bin/mount --bind /nix/.rw-store/var /nix/var/nix
   '';
 
-  age.identityPaths = lib.mkForce [ hostKeyPath ];
+  age.identityPaths = [ hostKeyPath ];
   services.openssh.hostKeys = [
     {
       path = hostKeyPath;

@@ -30,52 +30,34 @@ in
 
             branch = lib.mkOption {
               type = lib.types.str;
-              description = "Branch to track.";
+              description = "Branch to fetch when updating the checkout.";
             };
 
             rev = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
-              default = null;
+              type = lib.types.str;
               description = ''
-                Optional commit to pin the checkout to. When set and the
-                working tree is clean, the service checks out exactly this
-                commit (detached HEAD) instead of tracking the branch tip;
-                dirty working trees are never touched. updateWhenClean and
-                hardResetWhenDiverged only apply when rev is null.
+                Commit to pin the checkout to. When the working tree is clean,
+                the service checks out this commit (detached HEAD); dirty
+                working trees are left untouched.
               '';
             };
 
             user = lib.mkOption {
               type = lib.types.str;
               default = "root";
-              description = "Service user used for clone, fetch, checkout, and pull.";
+              description = "Service user used for clone, fetch, and checkout.";
             };
 
             group = lib.mkOption {
               type = lib.types.str;
               default = "root";
-              description = "Service group used for clone, fetch, checkout, and pull.";
+              description = "Service group used for clone, fetch, and checkout.";
             };
 
             dirMode = lib.mkOption {
               type = lib.types.str;
               default = "0755";
               description = "Mode for the checkout directory created via tmpfiles.";
-            };
-
-            updateWhenClean = lib.mkOption {
-              type = lib.types.bool;
-              default = true;
-              description = "Run ff-only pull when the working tree has no local changes.";
-            };
-
-            hardResetWhenDiverged = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = ''
-                If true and the working tree is clean, reset hard to origin/<branch>
-                when local and remote branch histories diverge.
-              '';
             };
           };
         }
@@ -118,9 +100,7 @@ in
           repo_path=${lib.escapeShellArg repo.path}
           repo_url=${lib.escapeShellArg repo.url}
           repo_branch=${lib.escapeShellArg repo.branch}
-          repo_rev=${lib.escapeShellArg (if repo.rev == null then "" else repo.rev)}
-          update_when_clean=${if repo.updateWhenClean then "1" else "0"}
-          hard_reset_when_diverged=${if repo.hardResetWhenDiverged then "1" else "0"}
+          repo_rev=${lib.escapeShellArg repo.rev}
 
           # Make sure the pinned commit exists locally; a rev can be ahead of
           # the last fetched branch tip (GitHub allows fetching bare commits).
@@ -137,58 +117,26 @@ in
             fi
             mkdir -p "$repo_path"
             git clone --origin origin --branch "$repo_branch" "$repo_url" "$repo_path"
-            if [ -n "$repo_rev" ]; then
-              ensure_rev_present
-              git -C "$repo_path" checkout --detach "$repo_rev"
-            fi
+            ensure_rev_present
+            git -C "$repo_path" checkout --detach "$repo_rev"
             exit 0
           fi
 
           git -C "$repo_path" remote set-url origin "$repo_url"
           git -C "$repo_path" fetch --prune origin "$repo_branch"
 
-          if [ -n "$repo_rev" ]; then
-            if [ -n "$(git -C "$repo_path" status --porcelain)" ]; then
-              echo "Working tree has local changes; leaving $repo_path untouched."
-              exit 0
-            fi
-            ensure_rev_present
-            if [ "$(git -C "$repo_path" rev-parse HEAD)" = "$(git -C "$repo_path" rev-parse "$repo_rev^{commit}")" ]; then
-              exit 0
-            fi
-            echo "Checking out pinned revision $repo_rev in $repo_path."
-            git -C "$repo_path" checkout --detach "$repo_rev"
+          if [ -n "$(git -C "$repo_path" status --porcelain)" ]; then
+            echo "Working tree has local changes; leaving $repo_path untouched."
             exit 0
           fi
 
-          if git -C "$repo_path" show-ref --verify --quiet "refs/heads/$repo_branch"; then
-            git -C "$repo_path" checkout "$repo_branch"
-          else
-            git -C "$repo_path" checkout -b "$repo_branch" --track "origin/$repo_branch"
+          ensure_rev_present
+          if [ "$(git -C "$repo_path" rev-parse HEAD)" = "$(git -C "$repo_path" rev-parse "$repo_rev^{commit}")" ]; then
+            exit 0
           fi
 
-          if [ "$update_when_clean" = "1" ]; then
-            if [ -n "$(git -C "$repo_path" status --porcelain)" ]; then
-              echo "Working tree has local changes; skipping pull for $repo_path."
-            else
-              local_head="$(git -C "$repo_path" rev-parse HEAD)"
-              remote_head="$(git -C "$repo_path" rev-parse "origin/$repo_branch")"
-
-              if [ "$local_head" = "$remote_head" ]; then
-                exit 0
-              fi
-
-              if git -C "$repo_path" merge-base --is-ancestor "$local_head" "$remote_head"; then
-                git -C "$repo_path" pull --ff-only origin "$repo_branch"
-              elif [ "$hard_reset_when_diverged" = "1" ]; then
-                echo "Branch diverged; resetting $repo_path to origin/$repo_branch."
-                git -C "$repo_path" reset --hard "origin/$repo_branch"
-              else
-                echo "Branch diverged for $repo_path; refusing to update without hardResetWhenDiverged." >&2
-                exit 1
-              fi
-            fi
-          fi
+          echo "Checking out pinned revision $repo_rev in $repo_path."
+          git -C "$repo_path" checkout --detach "$repo_rev"
         '';
       }
     ) cfg.repositories;

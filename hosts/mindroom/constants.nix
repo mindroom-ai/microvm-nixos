@@ -2,8 +2,7 @@ let
   # This microVM serves the lab Matrix/app domain. TLS is NOT terminated
   # here: an external reverse proxy (Traefik in the reference setup) owns the
   # public *.lab.mindroom.chat certificates and forwards plain HTTP to this
-  # VM on port 80. If you deploy without such a proxy, change the Caddy
-  # virtual hosts in caddy.nix to terminate TLS themselves.
+  # VM on port 80.
   siteDomain = "mindroom.lab.mindroom.chat";
 in
 {

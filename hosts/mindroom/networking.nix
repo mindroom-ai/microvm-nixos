@@ -5,8 +5,7 @@ _:
     hostName = "mindroom";
     nftables.enable = true;
     firewall.enable = true;
-    # Caddy binds port 80 only (TLS terminates outside this VM); add
-    # 443 here if you switch Caddy to terminate TLS itself.
+    # Caddy binds port 80 only (TLS terminates at an external reverse proxy).
     firewall.allowedTCPPorts = [ 80 ];
   };
 }
