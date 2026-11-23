@@ -15,7 +15,7 @@ Secrets are encrypted and managed with `agenix` and `ragenix`.
 Paste this prompt into your coding agent:
 
 ```text
-Clone https://github.com/mindroom-ai/microvm-nixos and follow AGENTS.md to deploy MindRoom.
+Follow https://github.com/mindroom-ai/microvm-nixos/blob/main/AGENTS.md to deploy MindRoom.
 ```
 
 **What you need:**
@@ -23,7 +23,7 @@ Clone https://github.com/mindroom-ai/microvm-nixos and follow AGENTS.md to deplo
 - An `x86_64-linux` host with `/dev/kvm` and at least 8 GiB free RAM
 - Nix with flakes enabled
 - An SSH key pair for operator access and secret encryption
-- An LLM API key (such as `OPENAI_API_KEY`) so agents can reply
+- An OpenAI API key (`OPENAI_API_KEY`) for the runbook as written (other providers can be added to `agent-integrations.env`)
 
 ## What's Included
 
@@ -54,7 +54,7 @@ The guest also includes Docker, Incus, distrobox, and CLI dev tools for the oper
 
 - `flake.nix` — NixOS flake for the microVM runner, system config, and pinned `ragenix`
 - `hosts/mindroom/` — host configuration, version pins, runtime toggles, and per-service configs
-- `modules/` — microVM guest wiring, base system, git checkouts, runtime services, and dev tooling
+- `modules/` — microVM guest wiring, base system, git checkouts, runtime services, secrets wiring, and dev tooling
 - `secrets/` + `hosts/mindroom/secrets/` — encrypted secrets and recipient lists (placeholders only in git)
 - `templates/` — plaintext templates used to seed secrets during bootstrap
 - `scripts/` — `bootstrap-secrets.sh` and `update-pins.sh`
