@@ -123,18 +123,20 @@ in
           fi
 
           git -C "$repo_path" remote set-url origin "$repo_url"
-          git -C "$repo_path" fetch --prune origin "$repo_branch"
 
           if [ -n "$(git -C "$repo_path" status --porcelain)" ]; then
             echo "Working tree has local changes; leaving $repo_path untouched."
             exit 0
           fi
 
-          ensure_rev_present
-          if [ "$(git -C "$repo_path" rev-parse HEAD)" = "$(git -C "$repo_path" rev-parse "$repo_rev^{commit}")" ]; then
+          if git -C "$repo_path" rev-parse --verify --quiet "$repo_rev^{commit}" >/dev/null \
+            && [ "$(git -C "$repo_path" rev-parse HEAD)" = "$(git -C "$repo_path" rev-parse "$repo_rev^{commit}")" ]; then
+            echo "Already at pinned revision $repo_rev in $repo_path; skipping fetch."
             exit 0
           fi
 
+          git -C "$repo_path" fetch --prune origin "$repo_branch"
+          ensure_rev_present
           echo "Checking out pinned revision $repo_rev in $repo_path."
           git -C "$repo_path" checkout --detach "$repo_rev"
         '';
