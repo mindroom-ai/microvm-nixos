@@ -13,7 +13,7 @@ values_dir=""
 
 usage() {
   cat <<'USAGE'
-Usage: bootstrap-secrets.sh [host] [--with-chat] [--non-interactive] [--values-dir DIR]
+Usage: bootstrap-secrets.sh [--with-chat] [--non-interactive] [--values-dir DIR]
 
   --with-chat        Also bootstrap chat-runtime.env.age (only needed when
                      mindroom.runtime.chat.enable = true).
@@ -41,12 +41,11 @@ while [ $# -gt 0 ]; do
       usage
       exit 0
       ;;
-    -*)
-      echo "Unknown flag: $1" >&2
+    *)
+      echo "Unknown argument: $1" >&2
       usage >&2
       exit 1
       ;;
-    *) host="$1" ;;
   esac
   shift
 done
@@ -65,7 +64,7 @@ fi
 if ! command -v ragenix >/dev/null 2>&1; then
   echo "Missing required command: ragenix" >&2
   echo "Run this via Nix from the repo root (uses the pinned ragenix):" >&2
-  echo "  nix shell .#ragenix -c ./scripts/bootstrap-secrets.sh $host" >&2
+  echo "  nix shell .#ragenix -c ./scripts/bootstrap-secrets.sh" >&2
   exit 1
 fi
 
@@ -202,7 +201,16 @@ check_kept_secret() {
 # mode encrypts them as-is. Contents come from --values-dir when a matching
 # file exists there, otherwise from templates/.
 
-content_dir="$(mktemp -d)"
+# Stage plaintext secret files (and ragenix's edit tempfile) on tmpfs only.
+if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ] && [ -w "$XDG_RUNTIME_DIR" ]; then
+  tmpfs_base="$XDG_RUNTIME_DIR"
+elif [ -d /dev/shm ] && [ -w /dev/shm ]; then
+  tmpfs_base="/dev/shm"
+else
+  echo "ERROR: neither \$XDG_RUNTIME_DIR nor /dev/shm is a writable tmpfs directory; refusing to stage plaintext secrets on disk." >&2
+  exit 1
+fi
+content_dir="$(umask 077 && mktemp -d "$tmpfs_base/mindroom-bootstrap.XXXXXX")"
 trap 'rm -rf "$content_dir"' EXIT
 
 content_for() {
@@ -228,13 +236,15 @@ case "$registration_token" in
     exit 1
     ;;
 esac
-printf '%s\n' "$registration_token" >"$content_dir/registration-token"
-
-content_for agent-integrations.env "$repo_root/templates/agent-integrations.env.example" >"$content_dir/agent-integrations.env"
-content_for agent-tooling.env "$repo_root/templates/agent-tooling.env.example" >"$content_dir/agent-tooling.env"
-content_for agent-runtime.env "$repo_root/templates/agent-runtime.env.example" >"$content_dir/agent-runtime.env"
-content_for lab-runtime.env "$repo_root/templates/lab-runtime.env.example" >"$content_dir/lab-runtime.env"
-content_for chat-runtime.env "$repo_root/templates/chat-runtime.env.example" >"$content_dir/chat-runtime.env"
+(
+  umask 077
+  printf '%s\n' "$registration_token" >"$content_dir/registration-token"
+  content_for agent-integrations.env "$repo_root/templates/agent-integrations.env.example" >"$content_dir/agent-integrations.env"
+  content_for agent-tooling.env "$repo_root/templates/agent-tooling.env.example" >"$content_dir/agent-tooling.env"
+  content_for agent-runtime.env "$repo_root/templates/agent-runtime.env.example" >"$content_dir/agent-runtime.env"
+  content_for lab-runtime.env "$repo_root/templates/lab-runtime.env.example" >"$content_dir/lab-runtime.env"
+  content_for chat-runtime.env "$repo_root/templates/chat-runtime.env.example" >"$content_dir/chat-runtime.env"
+)
 
 if grep -q '^MATRIX_REGISTRATION_TOKEN=$' "$content_dir/lab-runtime.env"; then
   # sed -i.bak (no space) works with both GNU and BSD sed.
@@ -288,7 +298,8 @@ exec "${BOOTSTRAP_REAL_EDITOR:-vi}" "$target"
 EOF
   chmod +x "$wrapper"
 
-  BOOTSTRAP_TEMPLATE="$content_path" \
+  TMPDIR="$content_dir" \
+    BOOTSTRAP_TEMPLATE="$content_path" \
     BOOTSTRAP_REAL_EDITOR="$real_editor" \
     ragenix --editor "$wrapper" --rules "$rules_path" --edit "$secret_path"
 
