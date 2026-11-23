@@ -232,7 +232,7 @@ ssh -o BatchMode=yes -p 2222 mindroom@127.0.0.1 'sudo systemctl restart git-chec
 
 ## 8. Register a Local Lab User and Verify an Agent Reply
 
-On first boot, `mindroom-lab` runs `mindroom config init --no-input --matrix-server self-hosted --provider openai` (filling your owner ID from `MINDROOM_OWNER_USER_ID` in `lab-runtime.env.age`), registers its agents (`@mindroom_user`, `@mindroom_router`, `@mindroom_mind`) on local Tuwunel, and initializes `/var/lib/mindroom/lab` as a Git repository with an initial commit.
+On first boot, `mindroom-lab` runs `mindroom config init --no-input --matrix-server self-hosted --provider openai` (filling your owner ID from `MINDROOM_OWNER_USER_ID` in `lab-runtime.env.age`), registers its agents (`@mindroom_user`, `@mindroom_router`, `@mindroom_mind`) on local Tuwunel, and initializes `/var/lib/mindroom/lab` as a Git repository, with an initial commit on fresh deployments (an upgraded state dir is left unstaged for review).
 Register the owner Matrix account, restart `mindroom-lab` so it invites you to the `personal` room, accept the invite, and verify a live reply from `@mindroom_mind` (requires a valid LLM provider key from step 4):
 
 ```bash
