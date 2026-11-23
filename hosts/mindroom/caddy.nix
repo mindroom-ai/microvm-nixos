@@ -2,7 +2,7 @@
 let
   constants = import ./constants.nix;
   inherit (constants)
-    publicCinnyDomain
+    publicChatDomain
     publicSiteDomain
     ;
   chatEnabled = config.mindroom.runtime.chat.enable;
@@ -68,7 +68,7 @@ in
         '';
       };
 
-      "${publicCinnyDomain}:80" = {
+      "${publicChatDomain}:80" = {
         extraConfig = ''
           reverse_proxy 127.0.0.1:8090
         '';

@@ -91,7 +91,7 @@ in
     writableStoreOverlay = "/nix/.rw-store";
 
     # Root is tmpfs; persistent state (/var incl. /var/lib/mindroom,
-    # /var/lib/tuwunel, /var/www/cinny; /srv/mindroom; and the writable Nix
+    # /var/lib/tuwunel, /var/www/mindroom-chat; /srv/mindroom; and the writable Nix
     # store overlay + DB) lives on sparse ext4 images created 0600 in $PWD.
     volumes = [
       {
