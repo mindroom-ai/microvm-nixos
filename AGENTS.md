@@ -138,7 +138,8 @@ Notes:
 - Supported filenames in `--values-dir` (no `.age` suffix): `agent-integrations.env`, `agent-tooling.env`, `agent-runtime.env`, `lab-runtime.env`, `chat-runtime.env`, `registration-token`. Missing files fall back to `templates/`.
 - The Tuwunel registration token is auto-generated and written to BOTH `registration-token.age` and `MATRIX_REGISTRATION_TOKEN` in `lab-runtime.env.age` so they stay in sync.
 - Keep `MATRIX_HOMESERVER=http://127.0.0.1:8008` and `MATRIX_SERVER_NAME=mindroom.lab.mindroom.chat` from the lab template unless you also change [hosts/mindroom/constants.nix](hosts/mindroom/constants.nix).
-- `templates/lab-runtime.env.example` sets `MINDROOM_OWNER_USER_ID=@you:mindroom.lab.mindroom.chat`, which `mindroom config init` reads on first boot to populate `administrators` and `room_defaults` without editing `config.yaml` (change the localpart in `lab-runtime.env` before first boot if you want a different username). Agenix (`/run/agenix/*`) is the single source of runtime env; `config init`'s starter `.env` is removed.
+- `templates/lab-runtime.env.example` sets `MINDROOM_OWNER_USER_ID=@you:mindroom.lab.mindroom.chat`, which `mindroom config init` reads on first boot to populate `administrators` and `room_defaults` without editing `config.yaml` (change the localpart in `lab-runtime.env` before first boot if you want a different username). agenix provides the runtime env; config init's starter `.env` is removed.
+- Upgrading an existing deployment: agenix values now win over any local `.env`; put overrides in the encrypted runtime env (`lab-runtime.env.age` / `chat-runtime.env.age`), add `MINDROOM_OWNER_USER_ID` to `lab-runtime.env.age`, and replace `__MINDROOM_OWNER_USER_ID_FROM_PAIRING__` in `/var/lib/mindroom/lab/config.yaml` once.
 - Re-runs keep existing `.age` files and verify their recipients match `secrets.nix`; if a prior attempt encrypted files to stale recipients, delete the listed `.age` files and re-run.
 
 ## 5. Preflight Check and Build the GC-Rooted Runner
@@ -238,8 +239,22 @@ Register the owner Matrix account, restart `mindroom-lab` so it invites you to t
 REPO=~/microvm-nixos STATE_DIR=~/.local/state/mindroom-microvm
 ssh -o BatchMode=yes -p 2222 mindroom@127.0.0.1 bash -s <<'EOF'
 set -euo pipefail
-OWNER_ID=$(sudo awk -F= '$1=="MINDROOM_OWNER_USER_ID"{print $2}' /run/agenix/lab-runtime-env)
-OWNER_ID="${OWNER_ID:-@you:mindroom.lab.mindroom.chat}"
+OWNER_ID=$(sudo awk -F= '$1=="MINDROOM_OWNER_USER_ID"{sub(/^[^=]*=/,""); print; exit}' /run/agenix/lab-runtime-env | tr -d '\r')
+if [ -z "$OWNER_ID" ] || [ "$OWNER_ID" = "__MINDROOM_OWNER_USER_ID_FROM_PAIRING__" ]; then
+  echo "MINDROOM_OWNER_USER_ID is unset or still a placeholder in /run/agenix/lab-runtime-env; set it to @<user>:mindroom.lab.mindroom.chat and re-deploy before registering." >&2
+  exit 1
+fi
+if grep -qF "__MINDROOM_OWNER_USER_ID_FROM_PAIRING__" /var/lib/mindroom/lab/config.yaml; then
+  echo "/var/lib/mindroom/lab/config.yaml still contains __MINDROOM_OWNER_USER_ID_FROM_PAIRING__; replace it with \"$OWNER_ID\" and restart mindroom-lab before registering." >&2
+  exit 1
+fi
+case "$OWNER_ID" in
+  @*:* ) ;;
+  *)
+    echo "Invalid MINDROOM_OWNER_USER_ID '$OWNER_ID' (expected @<user>:<server>)." >&2
+    exit 1
+    ;;
+esac
 USER_LOCALPART="${OWNER_ID#@}"
 USER_LOCALPART="${USER_LOCALPART%%:*}"
 PASSWORD=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')

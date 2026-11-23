@@ -30,7 +30,7 @@ Follow [AGENTS.md](AGENTS.md) for the exact copy-paste commands:
 | `mindroom-chat` | MindRoom agents on hosted `mindroom.chat` (default off) | `127.0.0.1:8766` |
 | `git-checkout-*` | Keeps MindRoom and MindRoom Chat at pinned commits | — |
 
-The VM runs on QEMU (4 vCPU, 8 GiB RAM) with persistent `/var`, `/srv`, and a writable Nix store overlay, plus Docker, Incus, distrobox, and CLI dev tools. Toggle `lab` or `chat` in [hosts/mindroom/default.nix](hosts/mindroom/default.nix).
+The VM runs on QEMU (4 vCPU, 8 GiB RAM) with persistent `/var`, `/srv`, and a writable Nix store overlay, plus Docker, Incus, distrobox, and CLI dev tools. Toggle `lab` or `chat` in [hosts/mindroom/default.nix](hosts/mindroom/default.nix) (`chat` needs hosted `mindroom.chat` pairing credentials in `chat-runtime.env.age`). Changing domains in [hosts/mindroom/constants.nix](hosts/mindroom/constants.nix) also requires updating `MATRIX_SERVER_NAME` and `MINDROOM_OWNER_USER_ID` in `lab-runtime.env.age` and a matching MindRoom Chat build.
 
 ## Who has root
 
@@ -41,9 +41,9 @@ Treat the VM as the security boundary and as expendable; keep anything agents mu
 ## Your setup is in git
 
 On first boot, `mindroom-lab` runs `mindroom config init --no-input --matrix-server self-hosted --provider openai` (reading `MINDROOM_OWNER_USER_ID` from `lab-runtime.env.age`), turns `/var/lib/mindroom/lab` into a Git repository, and commits the generated `config.yaml` and agent workspace.
-Secrets, `.env`, `.venv/`, databases, logs, and other runtime state under `mindroom_data/` are excluded by `.gitignore`, and `agenix` (`/run/agenix/*`) is the single source of runtime environment variables.
-The agent's workspace `AGENTS.md` instructs it to commit every setup change with a clear message and never commit secrets.
-The NixOS flake itself lives on the host, so the agent cannot rebuild the VM from inside.
+A deny-by-default `.gitignore` tracks only `config.yaml`, `.gitignore`, and agent workspaces (excluding `.ssh/`, `.config/`, credentials, keys, `.env*`, venvs, caches, databases, and runtime state); agenix provides the runtime env; config init's starter `.env` is removed.
+The agent's workspace `AGENTS.md` instructs it to stage only the files it changed, commit every setup change with a clear message, and never commit secrets.
+The NixOS deployment flake belongs to the operator on the host, outside the microVM.
 
 ## Security
 
