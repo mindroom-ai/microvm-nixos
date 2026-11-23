@@ -5,63 +5,58 @@
   <img src="https://raw.githubusercontent.com/mindroom-ai/mindroom/main/assets/logo/logo-mark.svg" alt="MindRoom Logo" align="right" width="120" />
 </picture>
 
-Standalone NixOS flake that runs the full MindRoom stack (local Matrix homeserver, MindRoom Chat web UI, Caddy, and MindRoom AI agents) inside a QEMU microVM via `microvm.nix`.
+Deploy a self-contained MindRoom stack — local Matrix homeserver, MindRoom Chat web UI, reverse proxy, and AI agent runtime — in a standalone QEMU microVM via `microvm.nix`.
+Secrets are encrypted and managed with `agenix` and `ragenix`.
 
-Looking for an Incus LXC container instead? See [mindroom-ai/lxc-nixos](https://github.com/mindroom-ai/lxc-nixos).
+## Quick Start
 
-## Deploy
+**[AGENTS.md](AGENTS.md) is the setup runbook**, written for AI coding agents (or humans) to follow verbatim from clone to verified agent reply.
 
-Follow [AGENTS.md](AGENTS.md) for the exact copy-paste commands:
+Paste this prompt into your coding agent:
 
-1. Clone this repo and add your SSH public key to [hosts/mindroom/default.nix](hosts/mindroom/default.nix).
-2. Create a private state directory outside the repo and generate the VM's SSH host key.
-3. Add both SSH keys to `secrets.nix`, then run `./scripts/bootstrap-secrets.sh` with your LLM API key.
-4. Build the runner (`nix build --out-link runner "$REPO"`) and start the VM.
-5. Register your Matrix user and message `@mindroom_mind`.
+```text
+Follow https://github.com/mindroom-ai/microvm-nixos/blob/main/AGENTS.md to deploy MindRoom.
+```
 
-## What runs
+**What you need:**
 
-| Service | Role | Port |
-| --- | --- | --- |
-| `tuwunel` | Local Matrix homeserver | `127.0.0.1:8008` |
-| `caddy` | HTTP reverse proxy | `80` (forwarded from host `127.0.0.1:8080`) |
-| `mindroom-cinny` | MindRoom Chat web UI (built in-guest) | `8090` (proxied by Caddy) |
-| `mindroom-lab` | MindRoom agents on local Tuwunel (default on) | `127.0.0.1:8765` |
-| `mindroom-chat` | MindRoom agents on hosted `mindroom.chat` (default off) | `127.0.0.1:8766` |
-| `git-checkout-*` | Keeps MindRoom and MindRoom Chat at pinned commits | — |
+- An `x86_64-linux` host with `/dev/kvm` and at least 8 GiB free RAM
+- Nix with flakes enabled
+- An SSH key pair for operator access and secret encryption
+- An OpenAI API key (`OPENAI_API_KEY`) for the runbook as written (other providers can be added to `agent-integrations.env`)
 
-The VM runs on QEMU (4 vCPU, 8 GiB RAM) with persistent `/var`, `/srv`, and a writable Nix store overlay, plus Docker, Incus, distrobox, and CLI dev tools. Toggle `lab` or `chat` in [hosts/mindroom/default.nix](hosts/mindroom/default.nix) (`chat` needs hosted `mindroom.chat` pairing credentials in `chat-runtime.env.age`). Changing domains in [hosts/mindroom/constants.nix](hosts/mindroom/constants.nix) also requires updating `MATRIX_SERVER_NAME` and `MINDROOM_OWNER_USER_ID` in `lab-runtime.env.age` and a matching MindRoom Chat build.
+## What's Included
 
-## Who has root
+| Service | What it does |
+| --- | --- |
+| `tuwunel` | Local Matrix homeserver (MindRoom's Tuwunel fork) |
+| `caddy` | HTTP reverse proxy routing the public hostnames |
+| `mindroom-cinny` | MindRoom Chat web UI, built inside the VM on first boot |
+| `mindroom-lab` | MindRoom AI agent runtime for the local homeserver (default on) |
+| `mindroom-chat` | MindRoom AI agent runtime for hosted `mindroom.chat` (default off) |
+| `git-checkout-*` | Keeps the MindRoom and MindRoom Chat source checkouts at pinned commits |
 
-**Agents have full root inside the microVM by design.**
-The MindRoom runtime runs as the `mindroom` operator account with passwordless `sudo`, Docker, and Incus access, and `/run/wrappers/bin` on its `PATH` so the agent's shell tool can run `sudo` directly.
-Treat the VM as the security boundary and as expendable; keep anything agents must not touch outside it.
+The guest also includes Docker, Incus, distrobox, and CLI dev tools for the operator and agents.
 
-## Your setup is in git
+## Two Runtimes: Lab vs. Chat
 
-On first boot, `mindroom-lab` runs `mindroom config init --no-input --matrix-server self-hosted --provider openai` (reading `MINDROOM_OWNER_USER_ID` from `lab-runtime.env.age`), turns `/var/lib/mindroom/lab` into a Git repository, and commits the generated `config.yaml` and agent workspace.
-A deny-by-default `.gitignore` tracks only `config.yaml`, `.gitignore`, and agent workspaces (excluding `.ssh/`, `.config/`, credentials, keys, `.env*`, venvs, caches, databases, and runtime state); agenix provides the runtime env; config init's starter `.env` is removed.
-The agent's workspace `AGENTS.md` instructs it to stage only the files it changed, commit every setup change with a clear message, and never commit secrets.
-The NixOS deployment flake belongs to the operator on the host, outside the microVM.
+- **Lab (`mindroom.runtime.lab.enable`, default on):** Self-contained setup where agents register and chat on the local Tuwunel homeserver inside the VM.
+- **Chat (`mindroom.runtime.chat.enable`, default off):** Connects agents to hosted `mindroom.chat`; requires pairing credentials.
 
-## Security
+## Good to Know
 
-- **TLS proxy required:** Caddy serves plain HTTP on port 80 only (forwarded from host loopback `127.0.0.1:8080`; SSH is on `127.0.0.1:2222`), while Matrix `.well-known` advertises `https://`. Put a TLS-terminating reverse proxy in front before exposing it.
-- **Host loopback (`10.0.2.2`):** Default QEMU user networking lets the guest reach services bound to the host's `127.0.0.1` via `10.0.2.2`.
-- **Shared host Nix store:** The default 9p `ro-store` share exposes the host's entire `/nix/store` read-only to the guest.
-- **Hardening:** Only use the defaults on a host without sensitive loopback services or secrets in `/nix/store`. See [AGENTS.md](AGENTS.md#hardening-optional) for switching to `storeOnDisk` and `tap` networking.
+- **Security boundary:** The microVM is the sandbox — agents run as the operator user with full passwordless root (`sudo`) and Docker/Incus access inside it by design, so treat the VM as expendable. Default SLIRP networking and the read-only host `/nix/store` share have host-isolation caveats; see [Security Model and Hardening](AGENTS.md#security-model-and-hardening) for hardening options.
+- **Version-controlled setup from `mindroom config init`:** First boot generates `config.yaml` directly from `mindroom config init --no-input --matrix-server self-hosted --provider openai` (filling the owner from `MINDROOM_OWNER_USER_ID`), initializes `/var/lib/mindroom/lab` (`config.yaml` and agent workspaces) as a Git repo with a deny-by-default `.gitignore`, and instructs the agent to commit every setup change.
+- **HTTPS / TLS:** Caddy listens on plain HTTP port 80 only; put a TLS-terminating reverse proxy in front before exposing publicly (see [TLS Model](AGENTS.md#tls-model)).
+- **Updates:** Pinned versions update daily via GitHub Actions; `git pull`, rebuilding the runner, and restarting applies them while leaving local checkout edits untouched (see [Version Pinning and Updates](AGENTS.md#version-pinning-and-updates)).
+- **Looking for LXC instead?** See [mindroom-ai/lxc-nixos](https://github.com/mindroom-ai/lxc-nixos) to deploy the same stack in an Incus LXC container.
 
-## Updates
+## Repository Layout
 
-Tuwunel, MindRoom, and MindRoom Chat versions are pinned in [hosts/mindroom/constants.nix](hosts/mindroom/constants.nix) and bumped daily by CI (or locally via `./scripts/update-pins.sh`).
-To update, run `git pull`, shut down the VM, rebuild the runner, and start it again (see [AGENTS.md](AGENTS.md#9-stop-reboot-and-update)). Clean checkouts advance to the new pins; checkouts with local changes are left untouched.
-
-## Layout
-
-- `AGENTS.md` — full step-by-step deployment runbook
-- `flake.nix` — NixOS system, microVM runner, `ragenix` CLI, and eval check
-- `hosts/mindroom/` — pins/domains (`constants.nix`), SSH keys & runtime toggles (`default.nix`), service configs
-- `modules/` — microVM guest glue (`microvm-guest.nix`), base system, checkouts, agent runtimes, secrets
-- `secrets/` + `hosts/mindroom/secrets/` — encrypted secrets and recipient lists (placeholders only)
-- `templates/` + `scripts/` — secret templates, `bootstrap-secrets.sh`, `update-pins.sh`
+- `flake.nix` — NixOS flake for the microVM runner, system config, and pinned `ragenix`
+- `hosts/mindroom/` — host configuration, version pins, runtime toggles, and per-service configs
+- `modules/` — microVM guest wiring, base system, git checkouts, runtime services, secrets wiring, and dev tooling
+- `secrets/` + `hosts/mindroom/secrets/` — encrypted secrets and recipient lists (placeholders only in git)
+- `templates/` — plaintext templates used to seed secrets during bootstrap
+- `scripts/` — `bootstrap-secrets.sh` and `update-pins.sh`
+- [AGENTS.md](AGENTS.md) — step-by-step deployment runbook and full technical reference
