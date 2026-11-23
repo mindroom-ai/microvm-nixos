@@ -45,7 +45,8 @@ The guest also includes Docker, Incus, distrobox, and CLI dev tools for the oper
 
 ## Good to Know
 
-- **Security boundary:** The microVM is the sandbox — agents run as the operator user with root and Docker access inside it by design, so treat the VM as expendable. Default SLIRP networking and the read-only host `/nix/store` share have host-isolation caveats; see [Security Model and Hardening](AGENTS.md#security-model-and-hardening) for hardening options.
+- **Security boundary:** The microVM is the sandbox — agents run as the operator user with full passwordless root (`sudo`) and Docker/Incus access inside it by design, so treat the VM as expendable. Default SLIRP networking and the read-only host `/nix/store` share have host-isolation caveats; see [Security Model and Hardening](AGENTS.md#security-model-and-hardening) for hardening options.
+- **Version-controlled setup from `mindroom config init`:** First boot generates `config.yaml` directly from `mindroom config init --no-input --matrix-server self-hosted --provider openai` (filling the owner from `MINDROOM_OWNER_USER_ID`), initializes `/var/lib/mindroom/lab` (`config.yaml` and agent workspaces) as a Git repo with a deny-by-default `.gitignore`, and instructs the agent to commit every setup change.
 - **HTTPS / TLS:** Caddy listens on plain HTTP port 80 only; put a TLS-terminating reverse proxy in front before exposing publicly (see [TLS Model](AGENTS.md#tls-model)).
 - **Updates:** Pinned versions update daily via GitHub Actions; `git pull`, rebuilding the runner, and restarting applies them while leaving local checkout edits untouched (see [Version Pinning and Updates](AGENTS.md#version-pinning-and-updates)).
 - **Looking for LXC instead?** See [mindroom-ai/lxc-nixos](https://github.com/mindroom-ai/lxc-nixos) to deploy the same stack in an Incus LXC container.
