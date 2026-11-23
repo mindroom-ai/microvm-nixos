@@ -13,7 +13,7 @@ For background on what the deployed VM contains and its security model, read [RE
 - An operator SSH public key at `~/.ssh/id_ed25519.pub` with its matching private key loaded in `ssh-agent` (`ssh-add -l` lists it) so non-interactive `ssh -o BatchMode=yes` succeeds (change `OP_KEY_FILE` in steps 1 and 3 if your key is elsewhere; must be `ssh-ed25519` or `ssh-rsa` for `ragenix`).
 - Outbound access to GitHub (the guest clones MindRoom and MindRoom Chat on first boot).
 - **Host isolation note:** Default QEMU user (SLIRP) networking allows the guest to reach host `127.0.0.1` loopback services via `10.0.2.2`, and the 9p `ro-store` share exposes the entire host `/nix/store`.
-  Run the defaults only on a host without sensitive loopback-only services or secrets in `/nix/store` (see [README.md](README.md#security-model) for `storeOnDisk` + removing the `ro-store` share, and `tap` hardening).
+  Run the defaults only on a host without sensitive loopback-only services or secrets in `/nix/store` (see [Hardening (optional)](#hardening-optional) below).
 
 ## 1. Clone and Configure the Host
 
@@ -138,6 +138,7 @@ Notes:
 - Supported filenames in `--values-dir` (no `.age` suffix): `agent-integrations.env`, `agent-tooling.env`, `agent-runtime.env`, `lab-runtime.env`, `chat-runtime.env`, `registration-token`. Missing files fall back to `templates/`.
 - The Tuwunel registration token is auto-generated and written to BOTH `registration-token.age` and `MATRIX_REGISTRATION_TOKEN` in `lab-runtime.env.age` so they stay in sync.
 - Keep `MATRIX_HOMESERVER=http://127.0.0.1:8008` and `MATRIX_SERVER_NAME=mindroom.lab.mindroom.chat` from the lab template unless you also change [hosts/mindroom/constants.nix](hosts/mindroom/constants.nix).
+- `templates/lab-runtime.env.example` sets `MINDROOM_OWNER_USER_ID=@you:mindroom.lab.mindroom.chat`, which `mindroom config init` reads on first boot to populate `administrators` and `room_defaults` without editing `config.yaml` (change the localpart in `lab-runtime.env` before first boot if you want a different username). Agenix (`/run/agenix/*`) is the single source of runtime env; `config init`'s starter `.env` is removed.
 - Re-runs keep existing `.age` files and verify their recipients match `secrets.nix`; if a prior attempt encrypted files to stale recipients, delete the listed `.age` files and re-run.
 
 ## 5. Preflight Check and Build the GC-Rooted Runner
@@ -230,14 +231,17 @@ ssh -o BatchMode=yes -p 2222 mindroom@127.0.0.1 'sudo systemctl restart git-chec
 
 ## 8. Register a Local Lab User and Verify an Agent Reply
 
-`mindroom-lab` registers its agents (`@mindroom_user`, `@mindroom_router`, `@mindroom_mind`) on local Tuwunel and starts with a placeholder `__MINDROOM_OWNER_USER_ID_FROM_PAIRING__` in `/var/lib/mindroom/lab/config.yaml`.
-Register a local user, bind it as the lab owner, accept the `personal` room invite, and verify a live reply from `@mindroom_mind` (requires a valid LLM provider key from step 4):
+On first boot, `mindroom-lab` runs `mindroom config init --no-input --matrix-server self-hosted --provider openai` (filling your owner ID from `MINDROOM_OWNER_USER_ID` in `lab-runtime.env.age`), registers its agents (`@mindroom_user`, `@mindroom_router`, `@mindroom_mind`) on local Tuwunel, and initializes `/var/lib/mindroom/lab` as a Git repository with an initial commit.
+Register the owner Matrix account, restart `mindroom-lab` so it invites you to the `personal` room, accept the invite, and verify a live reply from `@mindroom_mind` (requires a valid LLM provider key from step 4):
 
 ```bash
 REPO=~/microvm-nixos STATE_DIR=~/.local/state/mindroom-microvm
 ssh -o BatchMode=yes -p 2222 mindroom@127.0.0.1 bash -s <<'EOF'
 set -euo pipefail
-USER_LOCALPART="you"
+OWNER_ID=$(sudo awk -F= '$1=="MINDROOM_OWNER_USER_ID"{print $2}' /run/agenix/lab-runtime-env)
+OWNER_ID="${OWNER_ID:-@you:mindroom.lab.mindroom.chat}"
+USER_LOCALPART="${OWNER_ID#@}"
+USER_LOCALPART="${USER_LOCALPART%%:*}"
 PASSWORD=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
 TOKEN=$(sudo cat /run/agenix/registration-token)
 SESSION=$(curl -sS -X POST http://127.0.0.1:8008/_matrix/client/v3/register \
@@ -249,8 +253,7 @@ REG=$(jq -cn --arg u "$USER_LOCALPART" --arg p "$PASSWORD" --arg s "$SESSION" --
 unset TOKEN
 USER_ID=$(printf '%s' "$REG" | jq -r '.user_id // empty')
 ACCESS_TOKEN=$(printf '%s' "$REG" | jq -r '.access_token // empty')
-EXPECTED_ID="@${USER_LOCALPART}:mindroom.lab.mindroom.chat"
-if [ "$USER_ID" != "$EXPECTED_ID" ] || [ -z "$ACCESS_TOKEN" ]; then
+if [ "$USER_ID" != "$OWNER_ID" ] || [ -z "$ACCESS_TOKEN" ]; then
   echo "Registration failed (got '${USER_ID:-<empty>}')" >&2
   exit 1
 fi
@@ -258,8 +261,7 @@ fi
 unset PASSWORD
 printf 'Registered %s (password saved in ~/.lab-user-password, mode 0600)\n' "$USER_ID"
 
-# YAML requires quotes around a leading '@'.
-sed -i "s|__MINDROOM_OWNER_USER_ID_FROM_PAIRING__|\"$USER_ID\"|g" /var/lib/mindroom/lab/config.yaml
+# Restart mindroom-lab so it invites the newly registered owner to the personal room.
 sudo systemctl restart mindroom-lab
 
 # Wait for the invite to the personal room, join it, and send a test prompt.
@@ -308,7 +310,7 @@ Notes for browser login and TLS:
 
 - When signing in through MindRoom Chat (which defaults to hosted `mindroom.chat`), enter the lab homeserver `https://mindroom.lab.mindroom.chat` (served through your TLS proxy) before logging in.
   The raw forwarded `http://127.0.0.1:8080` is not a homeserver URL: Caddy routes by hostname.
-- Nothing inside this VM terminates TLS. Put a TLS-terminating reverse proxy in front of `127.0.0.1:8080` (see [README.md](README.md#tls-model)).
+- Nothing inside this VM terminates TLS. Put a TLS-terminating reverse proxy in front of `127.0.0.1:8080` (see [README.md](README.md#security)).
 
 ## 9. Stop, Reboot, and Update
 
@@ -342,3 +344,11 @@ REPO=~/microvm-nixos STATE_DIR=~/.local/state/mindroom-microvm
 ```
 
 Checkouts with uncommitted local changes are never touched by updates.
+
+## Hardening (optional)
+
+To isolate the microVM from host loopback services (`10.0.2.2`) and the host `/nix/store`, edit [modules/microvm-guest.nix](modules/microvm-guest.nix) to:
+
+1. Set `microvm.storeOnDisk = true` **and remove the `ro-store` entry from `microvm.shares` (keeping `ssh-host-key`)** so `/nix/.ro-store` is not defined twice (the writable overlay uses label `mindroom-rw`, avoiding collision with `storeOnDisk`'s `nix-store` label).
+2. Switch `microvm.interfaces` from `type = "user"` to `tap` networking (eliminating SLIRP `10.0.2.2` access): remove `microvm.forwardPorts` (which requires a `user` interface), configure the host-side TAP device/bridge, and connect to the VM's network address instead of `127.0.0.1:8080`/`2222` in steps 7–8.
+3. After host Nix garbage collection when using the default 9p store share, run `nix-store --verify` inside the guest if guest `nix` commands report missing paths.
