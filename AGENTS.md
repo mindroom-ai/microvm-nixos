@@ -196,7 +196,7 @@ REPO=~/microvm-nixos STATE_DIR=~/.local/state/mindroom-microvm
   trap 'rm -f "$SSH_ERR"' EXIT
   if ! timeout 600 bash -c '
     until ssh -n -o BatchMode=yes -o ConnectTimeout=5 -p 2222 mindroom@127.0.0.1 \
-      "systemctl is-active -q tuwunel && systemctl is-active -q caddy && systemctl is-active -q mindroom-cinny && systemctl is-active -q mindroom-lab" 2>"$1" \
+      "systemctl is-active -q tuwunel && systemctl is-active -q caddy && systemctl is-active -q mindroom-chat-ui && systemctl is-active -q mindroom-lab" 2>"$1" \
       && curl -sf -H "Host: chat.lab.mindroom.chat" http://127.0.0.1:8080/ >/dev/null; do
       grep -qE "Connection refused|Connection reset|Connection closed|kex_exchange_identification|timed out" "$1" 2>/dev/null || cat "$1" >&2
       sleep 10
@@ -208,7 +208,7 @@ REPO=~/microvm-nixos STATE_DIR=~/.local/state/mindroom-microvm
     exit 1
   fi
 
-  ssh -o BatchMode=yes -p 2222 mindroom@127.0.0.1 'systemctl --failed --no-pager && systemctl is-active tuwunel caddy mindroom-cinny mindroom-lab'
+  ssh -o BatchMode=yes -p 2222 mindroom@127.0.0.1 'systemctl --failed --no-pager && systemctl is-active tuwunel caddy mindroom-chat-ui mindroom-lab'
   printf '%.200s\n' "$(curl -fsS -H 'Host: mindroom.lab.mindroom.chat' http://127.0.0.1:8080/_matrix/client/versions)"
   curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: chat.lab.mindroom.chat' http://127.0.0.1:8080/
 )
@@ -217,7 +217,7 @@ REPO=~/microvm-nixos STATE_DIR=~/.local/state/mindroom-microvm
 Expect:
 
 - `0 loaded units listed.`
-- Four `active` lines (`tuwunel`, `caddy`, `mindroom-cinny`, `mindroom-lab`)
+- Four `active` lines (`tuwunel`, `caddy`, `mindroom-chat-ui`, `mindroom-lab`)
 - Matrix version JSON (`{"versions":[...]}`)
 - `200`
 
@@ -226,8 +226,8 @@ Inspect logs or retry a transient network failure if any unit fails:
 ```bash
 REPO=~/microvm-nixos STATE_DIR=~/.local/state/mindroom-microvm
 tail -n 50 "$STATE_DIR/console.log"
-ssh -o BatchMode=yes -p 2222 mindroom@127.0.0.1 'journalctl -u mindroom-lab -u mindroom-cinny-build -u tuwunel -n 100 --no-pager'
-ssh -o BatchMode=yes -p 2222 mindroom@127.0.0.1 'sudo systemctl restart git-checkout-cinny.service mindroom-cinny-build.service mindroom-cinny.service'
+ssh -o BatchMode=yes -p 2222 mindroom@127.0.0.1 'journalctl -u mindroom-lab -u mindroom-chat-ui-build -u tuwunel -n 100 --no-pager'
+ssh -o BatchMode=yes -p 2222 mindroom@127.0.0.1 'sudo systemctl restart git-checkout-mindroom-chat.service mindroom-chat-ui-build.service mindroom-chat-ui.service'
 ```
 
 ## 8. Register a Local Lab User and Verify an Agent Reply
@@ -383,7 +383,7 @@ Checkouts with uncommitted local changes are never touched by updates.
 | --- | --- | --- |
 | `tuwunel` | Local Matrix homeserver (MindRoom Tuwunel fork, pinned release binary) | 8008 (loopback) |
 | `caddy` | HTTP reverse proxy / routing for the public hostnames | 80 |
-| `mindroom-cinny` | MindRoom Chat web client (built in-guest on first boot) | 8090 (all interfaces; not open in the guest firewall) |
+| `mindroom-chat-ui` | MindRoom Chat web client (built in-guest on first boot) | 8090 (all interfaces; not open in the guest firewall) |
 | `mindroom-lab` | MindRoom agent runtime — local homeserver (optional, default on) | 8765 (loopback; unauthenticated dashboard/API, not proxied) |
 | `mindroom-chat` | MindRoom agent runtime — hosted mindroom.chat (optional, default off) | 8766 (loopback; proxied by Caddy when enabled) |
 | `git-checkout-*` | Keep the MindRoom and MindRoom Chat checkouts at the pinned revisions | — |
@@ -436,7 +436,7 @@ Do not expose the forwarded HTTP port directly to the internet without a TLS-ter
 
 ### Version Pinning and Updates
 
-Everything that runs is pinned in [hosts/mindroom/constants.nix](hosts/mindroom/constants.nix): the Tuwunel release (`tuwunelVersion` + `tuwunelArchiveHash`) and the exact commits of the MindRoom and MindRoom Chat checkouts (`mindroomRev`, `cinnyRev`).
+Everything that runs is pinned in [hosts/mindroom/constants.nix](hosts/mindroom/constants.nix): the Tuwunel release (`tuwunelVersion` + `tuwunelArchiveHash`) and the exact commits of the MindRoom and MindRoom Chat checkouts (`mindroomRev`, `mindroomChatRev`).
 The daily [update-pins](.github/workflows/update-pins.yml) GitHub workflow bumps all three to the latest upstream and pushes only after `nix flake check` passes; run [scripts/update-pins.sh](scripts/update-pins.sh) to do the same locally.
 
 Applying an update is `git pull`, `./runner/bin/microvm-shutdown`, `nix build --out-link runner "$REPO"`, and restarting detached with `setsid -f ./runner/bin/microvm-run > "$STATE_DIR/console.log" 2>&1 < /dev/null` (see [step 9](#9-stop-reboot-and-update)).
@@ -447,7 +447,7 @@ On the next boot, clean checkouts move to the new pinned commits and a MindRoom 
 - [hosts/mindroom/default.nix](hosts/mindroom/default.nix): runtime toggles, operator SSH keys, state paths
 - [modules/microvm-guest.nix](modules/microvm-guest.nix): vCPU/RAM, forwarded host ports, volume sizes, `machineId`, `storeOnDisk`/`tap` hardening
 - [hosts/mindroom/constants.nix](hosts/mindroom/constants.nix): public domains, Tuwunel release pin, and MindRoom/MindRoom Chat commit pins
-- Per-service host configuration in `hosts/mindroom/`: `caddy.nix`, `cinny.nix`, `mindroom.nix`, `networking.nix`, `tuwunel.nix`
+- Per-service host configuration in `hosts/mindroom/`: `caddy.nix`, `mindroom-chat.nix`, `mindroom.nix`, `networking.nix`, `tuwunel.nix`
 
 Changing the public domains in `constants.nix` is not enough by itself: `MATRIX_SERVER_NAME` and `MINDROOM_OWNER_USER_ID` inside `lab-runtime.env.age` must match, and MindRoom Chat bakes its homeserver defaults into its own build, so a full domain change also needs a matching client-side change.
 
@@ -457,7 +457,7 @@ Verified end-to-end on 2026-11-23 by booting a fresh microVM on an `x86_64-linux
 
 - Flake evaluation (`nix flake check`), Nix formatting (`nixfmt --check`), `shellcheck`, and `microvm.storeOnDisk = true` evaluation (with the `ro-store` share removed)
 - Private state directory creation outside the git work tree, git work-tree guards, `0700`/`0600` permissions, tmpfs-only non-interactive secret bootstrap, and first-boot `agenix` decryption
-- GC-rooted runner build, detached launch via `setsid -f` logging to `console.log`, and all guest services (`tuwunel`, `caddy`, `mindroom-cinny`, `mindroom-lab`, `docker`, `incus`, `sshd`) active with `systemctl --failed` empty
+- GC-rooted runner build, detached launch via `setsid -f` logging to `console.log`, and all guest services (`tuwunel`, `caddy`, the MindRoom Chat web UI service, `mindroom-lab`, `docker`, `incus`, `sshd`) active with `systemctl --failed` empty
 - Forwarded HTTP access to the Matrix client API, cross-origin `/.well-known/matrix/client` discovery (`Access-Control-Allow-Origin: *`), and MindRoom Chat web UI (HTTP 200, plus headless Chromium rendering the UI and reading `/.well-known/matrix/client` cross-origin)
 - Local Tuwunel agent registration, local lab user registration, and a live LLM reply from `@mindroom_mind`
 - Clean shutdown and offline-safe reboot persistence: same SSH host key, git checkout units skipping fetch when already at the pinned commit, no MindRoom Chat UI rebuild, multi-boot persistent journal, persisted Tuwunel user/room history, and offline `nix path-info` for a store path built on boot 1

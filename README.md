@@ -31,7 +31,7 @@ Follow https://github.com/mindroom-ai/microvm-nixos/blob/main/AGENTS.md to deplo
 | --- | --- |
 | `tuwunel` | Local Matrix homeserver (MindRoom's Tuwunel fork) |
 | `caddy` | HTTP reverse proxy routing the public hostnames |
-| `mindroom-cinny` | MindRoom Chat web UI, built inside the VM on first boot |
+| `mindroom-chat-ui` | MindRoom Chat web UI, built inside the VM on first boot |
 | `mindroom-lab` | MindRoom AI agent runtime for the local homeserver (default on) |
 | `mindroom-chat` | MindRoom AI agent runtime for hosted `mindroom.chat` (default off) |
 | `git-checkout-*` | Keeps the MindRoom and MindRoom Chat source checkouts at pinned commits |
