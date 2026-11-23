@@ -72,11 +72,6 @@ host_dir="$repo_root/hosts/$host"
 host_rules="$host_dir/secrets/secrets.nix"
 shared_rules="$repo_root/secrets/shared/secrets.nix"
 
-if [ ! -d "$host_dir" ]; then
-  echo "Unknown host: $host" >&2
-  exit 1
-fi
-
 count_recipients() {
   local rules_path="$1"
   local secret_name="$2"
@@ -201,13 +196,17 @@ check_kept_secret() {
 # mode encrypts them as-is. Contents come from --values-dir when a matching
 # file exists there, otherwise from templates/.
 
-# Stage plaintext secret files (and ragenix's edit tempfile) on tmpfs only.
-if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ] && [ -w "$XDG_RUNTIME_DIR" ]; then
-  tmpfs_base="$XDG_RUNTIME_DIR"
-elif [ -d /dev/shm ] && [ -w /dev/shm ]; then
-  tmpfs_base="/dev/shm"
-else
-  echo "ERROR: neither \$XDG_RUNTIME_DIR nor /dev/shm is a writable tmpfs directory; refusing to stage plaintext secrets on disk." >&2
+# Stage plaintext secret files (and ragenix's edit tempfile) on verified tmpfs only.
+tmpfs_base=""
+for candidate in "${XDG_RUNTIME_DIR:-}" /dev/shm; do
+  if [ -n "$candidate" ] && [ -d "$candidate" ] && [ -w "$candidate" ] \
+    && [ "$(stat -f -c %T "$candidate" 2>/dev/null || true)" = "tmpfs" ]; then
+    tmpfs_base="$candidate"
+    break
+  fi
+done
+if [ -z "$tmpfs_base" ]; then
+  echo "ERROR: neither \$XDG_RUNTIME_DIR nor /dev/shm is a writable tmpfs; refusing to stage plaintext secrets on disk." >&2
   exit 1
 fi
 content_dir="$(umask 077 && mktemp -d "$tmpfs_base/mindroom-bootstrap.XXXXXX")"
@@ -309,10 +308,6 @@ EOF
 
 echo "Repo root: $repo_root"
 echo "Target host: $host"
-echo
-echo "Add the microVM SSH host public key to the recipient lists before editing secrets."
-echo "Example (from your private VM state directory):"
-echo "  cat \"\$STATE_DIR/ssh/ssh_host_ed25519_key.pub\""
 echo
 
 ensure_recipients "$shared_rules" "agent-integrations.env.age"
