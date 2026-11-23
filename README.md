@@ -26,7 +26,7 @@ This README explains what runs inside the VM, how it is configured, and its secu
 The microVM is configured in [modules/microvm-guest.nix](modules/microvm-guest.nix) and ships Docker, Incus, distrobox, and a CLI/dev toolbox for the operator account and the agents:
 
 - **Compute:** QEMU hypervisor, 4 vCPU, 8 GiB RAM (sized for the first-boot MindRoom Chat Vite build and `uv` installs alongside the tmpfs root).
-- **Nix store:** Shares the host `/nix/store` read-only over 9p with an 8 GiB sparse ext4 writable overlay (`nix-store.img`, label `mindroom-rw`, mounting `/nix/.rw-store` and bind-mounting `/nix/.rw-store/var` onto `/nix/var/nix`) so `nix shell` / `nix develop` work inside the guest and guest-built store paths remain registered across reboots.
+- **Nix store:** Shares the host `/nix/store` read-only over 9p with an 8 GiB sparse ext4 writable overlay (`nix-store.img`, label `mindroom-rw`, mounting `/nix/.rw-store` and bind-mounting `/nix/.rw-store/var` onto `/nix/var/nix`) so `nix shell` / `nix develop` work inside the guest and guest-built store paths remain registered across reboots. After host Nix garbage collection, run `nix-store --verify` inside the guest if guest `nix` commands report missing paths.
 - **Persistent storage:** `/var` (20 GiB sparse ext4: Tuwunel DB, MindRoom state/venvs, MindRoom Chat checkout/build, journals, Docker/Incus) and `/srv` (4 GiB sparse ext4: MindRoom source checkout) live as `0600` images inside your private `0700` state directory outside the repo, with a pinned `microvm.machineId` so journals survive reboots.
 - **Identity & secrets:** A pre-generated SSH host key in `$STATE_DIR/ssh` is mounted read-only early in boot (`neededForBoot = true`), so `agenix` decrypts secrets on first boot and `sshd` keeps a stable host identity across reboots without placing key material in the git checkout.
 - **Networking:** QEMU user networking forwarding host loopback `127.0.0.1:8080 -> 80` (Caddy) and `127.0.0.1:2222 -> 22` (SSH).
@@ -54,7 +54,7 @@ Treat the VM as expendable, and do not put anything inside it that the agents mu
   - Run the defaults only on a host without sensitive loopback-only services or secrets in `/nix/store`.
 - **Hardening options:** To isolate the guest from host loopback services and the host `/nix/store`, edit [modules/microvm-guest.nix](modules/microvm-guest.nix) to:
   1. Set `microvm.storeOnDisk = true` **and remove the `ro-store` entry from `microvm.shares` (keeping `ssh-host-key`)** so `/nix/.ro-store` is not defined twice (the writable overlay uses label `mindroom-rw`, avoiding collision with `storeOnDisk`'s `nix-store` label).
-  2. Switch `microvm.interfaces` from `type = "user"` to `tap` networking (eliminating SLIRP `10.0.2.2` access).
+  2. Switch `microvm.interfaces` from `type = "user"` to `tap` networking (eliminating SLIRP `10.0.2.2` access): remove `microvm.forwardPorts` (which requires a `user` interface), configure the host-side TAP device/bridge, and connect to the VM's network address instead of the loopback `127.0.0.1:8080`/`2222` `curl`/`ssh` commands in [AGENTS.md](AGENTS.md).
 
 ### TLS Model
 
@@ -95,9 +95,9 @@ Verified end-to-end on 2026-11-23 by booting a fresh microVM on an `x86_64-linux
 - Flake evaluation (`nix flake check`), Nix formatting (`nixfmt --check`), `shellcheck`, and `microvm.storeOnDisk = true` evaluation (with the `ro-store` share removed)
 - Private state directory creation outside the git work tree, git work-tree guards, `0700`/`0600` permissions, tmpfs-only non-interactive secret bootstrap, and first-boot `agenix` decryption
 - GC-rooted runner build, detached launch via `setsid -f` logging to `console.log`, and all guest services (`tuwunel`, `caddy`, `mindroom-cinny`, `mindroom-lab`, `docker`, `incus`, `sshd`) active with `systemctl --failed` empty
-- Forwarded HTTP access to both the Matrix client API and MindRoom Chat web UI (HTTP 200)
+- Forwarded HTTP access to the Matrix client API, cross-origin `/.well-known/matrix/client` discovery (`Access-Control-Allow-Origin: *`), and MindRoom Chat web UI (HTTP 200, plus headless Chromium rendering the UI and reading `/.well-known/matrix/client` cross-origin)
 - Local Tuwunel agent registration, local lab user registration, and a live LLM reply from `@mindroom_mind`
-- Clean shutdown and reboot persistence: same SSH host key, no MindRoom Chat UI rebuild, multi-boot persistent journal, persisted Tuwunel user/room history, and offline `nix path-info` for a store path built on boot 1
+- Clean shutdown and offline-safe reboot persistence: same SSH host key, git checkout units skipping fetch when already at the pinned commit, no MindRoom Chat UI rebuild, multi-boot persistent journal, persisted Tuwunel user/room history, and offline `nix path-info` for a store path built on boot 1
 - Pin-bump update across reboot: changing `mindroomRev` to an older commit, rebuilding the runner, and rebooting moved `/srv/mindroom` to the new pin
 
 Not verified: the optional `chat` runtime against hosted `mindroom.chat`, an external TLS-terminating reverse proxy, and booting with `storeOnDisk`/`tap` hardening (only `storeOnDisk` evaluation was checked).

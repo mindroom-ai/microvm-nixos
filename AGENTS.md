@@ -8,10 +8,9 @@ For background on what the deployed VM contains and its security model, read [RE
 ## Preconditions
 
 - An `x86_64-linux` host with `/dev/kvm` readable and writable by your user (`[ -r /dev/kvm ] && [ -w /dev/kvm ]`; otherwise QEMU silently falls back to software TCG emulation).
-- `git`, `ssh-keygen`, `ssh`, `curl`, `setsid`, and `nix` installed on the host.
-  On a stock Nix install without flakes enabled in `nix.conf`, run `export NIX_CONFIG='extra-experimental-features = nix-command flakes'` once in your shell (flags on an outer `nix shell` do not reach inner `nix eval` calls in `scripts/bootstrap-secrets.sh`).
+- `git`, `ssh-keygen`, `ssh`, `curl`, `setsid`, and `nix` with flakes enabled (on stock Nix, add `experimental-features = nix-command flakes` to `~/.config/nix/nix.conf` once so every fresh shell and inner `nix eval` call has flakes enabled).
 - At least 8 GiB free RAM (for the first-boot MindRoom Chat web UI build and `uv` installs).
-- An operator SSH public key at `~/.ssh/id_ed25519.pub` (change `OP_KEY_FILE` in steps 1 and 3 if yours is elsewhere; must be `ssh-ed25519` or `ssh-rsa` for `ragenix`).
+- An operator SSH public key at `~/.ssh/id_ed25519.pub` with its matching private key loaded in `ssh-agent` (`ssh-add -l` lists it) so non-interactive `ssh -o BatchMode=yes` succeeds (change `OP_KEY_FILE` in steps 1 and 3 if your key is elsewhere; must be `ssh-ed25519` or `ssh-rsa` for `ragenix`).
 - Outbound access to GitHub (the guest clones MindRoom and MindRoom Chat on first boot).
 - **Host isolation note:** Default QEMU user (SLIRP) networking allows the guest to reach host `127.0.0.1` loopback services via `10.0.2.2`, and the 9p `ro-store` share exposes the entire host `/nix/store`.
   Run the defaults only on a host without sensitive loopback-only services or secrets in `/nix/store` (see [README.md](README.md#security-model) for `storeOnDisk` + removing the `ro-store` share, and `tap` hardening).
@@ -90,8 +89,8 @@ Expect exit 0. The repo ships empty recipient arrays and placeholder `.age` file
 ## 4. Bootstrap Secrets
 
 Encrypt all secrets non-interactively using the repo-pinned `ragenix`.
-If `OPENAI_API_KEY` is already exported in your environment, it is used directly; otherwise `read -rsp` prompts silently so the key never enters shell history.
-Plaintext staging stays in a `0700` tmpfs directory (`$XDG_RUNTIME_DIR` or `/dev/shm`) and is deleted on subshell exit:
+If `OPENAI_API_KEY` is already exported in your environment, it is used directly; otherwise `read -rsp` prompts silently on a TTY (or fails with a clear message if stdin is not a TTY) so the key never enters shell history.
+Plaintext staging requires a filesystem verified as `tmpfs` (`$XDG_RUNTIME_DIR` then `/dev/shm`, failing closed otherwise) and is deleted on subshell exit:
 
 ```bash
 REPO=~/microvm-nixos STATE_DIR=~/.local/state/mindroom-microvm
@@ -99,10 +98,23 @@ REPO=~/microvm-nixos STATE_DIR=~/.local/state/mindroom-microvm
   set -euo pipefail
   cd "$REPO"
   if [ -z "${OPENAI_API_KEY:-}" ]; then
+    if [ ! -t 0 ]; then
+      echo "OPENAI_API_KEY is not set and stdin is not a TTY; export OPENAI_API_KEY and re-run." >&2
+      exit 1
+    fi
     read -rsp "OPENAI_API_KEY: " OPENAI_API_KEY
     echo
   fi
-  SECRETS_TMP="$(umask 077 && mktemp -d "${XDG_RUNTIME_DIR:-/dev/shm}/mindroom-secrets.XXXXXX")"
+  TMPFS_BASE=""
+  for candidate in "${XDG_RUNTIME_DIR:-}" /dev/shm; do
+    if [ -n "$candidate" ] && [ -d "$candidate" ] && [ -w "$candidate" ] \
+      && [ "$(stat -f -c %T "$candidate" 2>/dev/null || true)" = "tmpfs" ]; then
+      TMPFS_BASE="$candidate"
+      break
+    fi
+  done
+  [ -n "$TMPFS_BASE" ] || { echo "Neither \$XDG_RUNTIME_DIR nor /dev/shm is a writable tmpfs; refusing to stage plaintext secrets on disk." >&2; exit 1; }
+  SECRETS_TMP="$(umask 077 && mktemp -d "$TMPFS_BASE/mindroom-secrets.XXXXXX")"
   trap 'rm -rf "$SECRETS_TMP"' EXIT
   (umask 077 && printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY" > "$SECRETS_TMP/agent-integrations.env")
   nix shell .#ragenix -c ./scripts/bootstrap-secrets.sh --non-interactive --values-dir "$SECRETS_TMP"
@@ -257,18 +269,17 @@ for _ in $(seq 1 60); do
     'http://127.0.0.1:8008/_matrix/client/v3/sync?timeout=2000' | \
     jq -r '
       ((.rooms.invite // {}) | to_entries | map(select(any(.value.invite_state.events[]?; .type == "m.room.name" and (.content.name // "" | ascii_downcase) == "personal"))) | .[0].key)
-      // ((.rooms.invite // {}) | keys[0])
-      // ((.rooms.join // {}) | keys[0])
       // empty
     ')
   [ -n "$ROOM_ID" ] && break
   sleep 2
 done
-[ -n "$ROOM_ID" ] || { echo "Timed out waiting for room invite" >&2; exit 1; }
+[ -n "$ROOM_ID" ] || { echo "Timed out waiting for personal room invite" >&2; exit 1; }
 
 ENC_ROOM=$(jq -rn --arg r "$ROOM_ID" '$r|@uri')
 curl -sfS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
   -d '{}' "http://127.0.0.1:8008/_matrix/client/v3/join/$ENC_ROOM" >/dev/null
+sleep 2
 curl -sfS -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
   -d '{"msgtype":"m.text","body":"@mindroom_mind reply with exactly: MICROVM-OK","m.mentions":{"user_ids":["@mindroom_mind:mindroom.lab.mindroom.chat"]}}' \
   "http://127.0.0.1:8008/_matrix/client/v3/rooms/$ENC_ROOM/send/m.room.message/test-$(date +%s)" >/dev/null
